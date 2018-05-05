@@ -1,0 +1,12 @@
+* Resizable window.
+* Validate ocean parameters (it just throws an assertion error on non-power-of-2 grid sizes right now).
+* More accurate normal map calculation. Take the gradient of the Fourier Series and run IDFT on it?
+* The SSE code is a direct translation of the scalar code. Can we do better?
+* Remove unused code (this project was extracted from one of my other projects).
+* Generating the ocean spectrum takes longer than performing the IDFT.
+* Wide random numbers (uniform and normal distributions).
+* Wide mathematical functions (sine/cosine and complex exponential).
+* Avoid unaligned loads/stores? Does it even matter anymore?
+* Threading.
+* Single-precision IDFT.
+* AVX.

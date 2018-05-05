@@ -1,0 +1,16 @@
+OceanTool
+
+
+
+Dependencies:
+SDL2
+
+Building:
+mkdir build
+cd build
+cmake ..
+make
+
+Build options:
+USE_SIMD            - enable SIMD code path for IDFTs
+DEBUG_OPENGL        - enable OpenGL debug messages
