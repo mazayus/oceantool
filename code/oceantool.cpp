@@ -36,6 +36,8 @@
 #define INITIAL_WINDOW_WIDTH    1366
 #define INITIAL_WINDOW_HEIGHT   768
 
+#define MILLISECONDS_PER_FRAME  16
+
 static SDL_Window* sdl_window;
 static SDL_GLContext sdl_glcontext;
 static int window_width = INITIAL_WINDOW_WIDTH;
@@ -121,11 +123,27 @@ int main(int argc, char* argv[])
     OceanTool ocean_tool = {};
     InitOceanTool(&ocean_tool);
 
+    bool should_quit = false;
+
+    uint32_t last_frame_time = SDL_GetTicks();
+
     int mouse_buttons = 0, mouse_dwheel = 0, mouse_dx = 0, mouse_dy = 0;
 
-    bool quit = false;
-    while (!quit)
+    while (!should_quit)
     {
+        uint32_t time = SDL_GetTicks();
+        uint32_t dt = time - last_frame_time;
+
+        if (dt < MILLISECONDS_PER_FRAME)
+        {
+            SDL_Delay(MILLISECONDS_PER_FRAME - dt);
+
+            time = SDL_GetTicks();
+            dt = time - last_frame_time;
+        }
+
+        last_frame_time = time;
+
         mouse_dwheel = 0; mouse_dx = 0; mouse_dy = 0;
 
         SDL_Event event;
@@ -134,7 +152,7 @@ int main(int argc, char* argv[])
             switch (event.type)
             {
             case SDL_QUIT:
-                quit = true;
+                should_quit = true;
                 break;
             case SDL_KEYDOWN:
                 break;
@@ -188,6 +206,8 @@ int main(int argc, char* argv[])
         }
 
         ImGui::NewFrame();
+
+        ImGui::GetIO().DeltaTime = dt / 1000.0f;
 
         UpdateOceanTool(&ocean_tool, mouse_buttons, mouse_dwheel, mouse_dx, mouse_dy);
 
