@@ -33,11 +33,13 @@
 
 #define WINDOW_TITLE    "OceanTool"
 
-#define WINDOW_WIDTH    1366
-#define WINDOW_HEIGHT   768
+#define INITIAL_WINDOW_WIDTH    1366
+#define INITIAL_WINDOW_HEIGHT   768
 
 static SDL_Window* sdl_window;
 static SDL_GLContext sdl_glcontext;
+static int window_width = INITIAL_WINDOW_WIDTH;
+static int window_height = INITIAL_WINDOW_HEIGHT;
 
 static bool Init();
 static void Shutdown();
@@ -134,8 +136,6 @@ int main(int argc, char* argv[])
             case SDL_QUIT:
                 quit = true;
                 break;
-            case SDL_WINDOWEVENT:
-                break;
             case SDL_KEYDOWN:
                 break;
             case SDL_KEYUP:
@@ -174,6 +174,13 @@ int main(int argc, char* argv[])
                 break;
             case SDL_MOUSEWHEEL:
                 mouse_dwheel += event.wheel.y * ((event.wheel.direction == SDL_MOUSEWHEEL_NORMAL) ? 1 : -1);
+                break;
+            case SDL_WINDOWEVENT:
+                if (event.window.event == SDL_WINDOWEVENT_SIZE_CHANGED)
+                {
+                    window_width = event.window.data1;
+                    window_height = event.window.data2;
+                }
                 break;
             }
 
@@ -298,7 +305,8 @@ static bool Init()
     SDL_GL_SetAttribute(SDL_GL_BLUE_SIZE, 8);
     SDL_GL_SetAttribute(SDL_GL_ALPHA_SIZE, 0);
 
-    sdl_window = SDL_CreateWindow(WINDOW_TITLE, 0, 0, WINDOW_WIDTH, WINDOW_HEIGHT, SDL_WINDOW_OPENGL);
+    sdl_window = SDL_CreateWindow(WINDOW_TITLE, 0, 0, window_width, window_height,
+                                  SDL_WINDOW_OPENGL | SDL_WINDOW_RESIZABLE);
     if (!sdl_window)
     {
         fprintf(stderr, "SDL_CreateWindow: %s\n", SDL_GetError());
@@ -342,6 +350,9 @@ static bool Init()
 
 #endif
 
+    // NOTE: This fixes flickering when resizing the window on Linux.
+    SDL_GL_SetSwapInterval(0);
+
     return true;
 }
 
@@ -366,10 +377,8 @@ static void InitImGui()
 {
     ImGuiIO& io = ImGui::GetIO();
 
-    int win_width = 0, win_height = 0;
-    SDL_GetWindowSize(sdl_window, &win_width, &win_height);
-    io.DisplaySize.x = win_width;
-    io.DisplaySize.y = win_height;
+    io.DisplaySize.x = window_width;
+    io.DisplaySize.y = window_height;
 
     io.KeyMap[ImGuiKey_Tab] = SDL_SCANCODE_TAB;
     io.KeyMap[ImGuiKey_LeftArrow] = SDL_SCANCODE_LEFT;
@@ -401,9 +410,6 @@ static void InitImGui()
     GL_InitShaderProgram(&imgui_program);
 
     glUseProgram(imgui_program.id);
-
-    glUniformMatrix4fv(glGetUniformLocation(imgui_program.id, "u_ProjectionMatrix"), 1, GL_FALSE,
-                       Matrix4::MakeOrtho(0, win_width, win_height, 0, -1, 1).data);
 
     glUniform1i(glGetUniformLocation(imgui_program.id, "u_Font"), 0);
 
@@ -447,6 +453,7 @@ static void InitImGui()
 static void SendEventToImGui(const SDL_Event* event)
 {
     ImGuiIO& io = ImGui::GetIO();
+
     switch (event->type)
     {
     case SDL_KEYDOWN:
@@ -504,6 +511,13 @@ static void SendEventToImGui(const SDL_Event* event)
     case SDL_TEXTINPUT:
         io.AddInputCharactersUTF8(event->text.text);
         break;
+    case SDL_WINDOWEVENT:
+        if (event->window.event == SDL_WINDOWEVENT_SIZE_CHANGED)
+        {
+            io.DisplaySize.x = event->window.data1;
+            io.DisplaySize.y = event->window.data2;
+        }
+        break;
     }
 }
 
@@ -511,9 +525,7 @@ static void RenderImGui()
 {
     ImGui::Render();
 
-    int win_width = 0, win_height = 0;
-    SDL_GetWindowSize(sdl_window, &win_width, &win_height);
-    glViewport(0, 0, win_width, win_height);
+    glViewport(0, 0, window_width, window_height);
 
     glUseProgram(imgui_program.id);
     glPolygonMode(GL_FRONT_AND_BACK, GL_FILL);
@@ -532,6 +544,9 @@ static void RenderImGui()
     glDisable(GL_DEPTH_TEST);
     glEnable(GL_SCISSOR_TEST);
     glDisable(GL_CULL_FACE);
+
+    glUniformMatrix4fv(glGetUniformLocation(imgui_program.id, "u_ProjectionMatrix"), 1, GL_FALSE,
+                       Matrix4::MakeOrtho(0, window_width, window_height, 0, -1, 1).data);
 
     ImDrawData* draw_data = ImGui::GetDrawData();
     for (int draw_list_index = 0; draw_list_index < draw_data->CmdListsCount; ++draw_list_index)
@@ -552,7 +567,7 @@ static void RenderImGui()
             glBindTexture(GL_TEXTURE_2D, (GLuint)(uintptr_t)draw_cmd->TextureId);
 
             glScissor(draw_cmd->ClipRect.x,
-                      win_height - draw_cmd->ClipRect.w,
+                      window_height - draw_cmd->ClipRect.w,
                       draw_cmd->ClipRect.z - draw_cmd->ClipRect.x,
                       draw_cmd->ClipRect.w - draw_cmd->ClipRect.y);
             glDrawElements(GL_TRIANGLES, draw_cmd->ElemCount, GL_UNSIGNED_SHORT,
@@ -621,11 +636,8 @@ static void InitOceanTool(OceanTool* tool)
 
     tool->pending_params = tool->params;
 
-    int win_width = 0, win_height = 0;
-    SDL_GetWindowSize(sdl_window, &win_width, &win_height);
-
     tool->camera.fovy = Math::PI / 3;
-    tool->camera.aspect = (float) (win_width - win_width / 4) / (float) win_height;
+    tool->camera.aspect = (float) (window_width * 3 / 4) / (float) window_height;
     tool->camera.znear = 0.1f;
     tool->camera.zfar = 10000.0f;
     tool->camera.transform.translation = Vector3(0, 0, 1000);
@@ -952,15 +964,12 @@ static void SaveNormalMap(OceanTool* tool, const char* filename)
 
 static void UpdateOceanTool(OceanTool* tool, int buttons, int dwheel, int dx, int dy)
 {
-    int win_width = 0, win_height = 0;
-    SDL_GetWindowSize(sdl_window, &win_width, &win_height);
-
     // draw main panel
 
     ImGui::PushStyleVar(ImGuiStyleVar_WindowRounding, 0);
 
     ImGui::SetNextWindowPos(ImVec2(0, 0));
-    ImGui::SetNextWindowSize(ImVec2(win_width / 4, win_height));
+    ImGui::SetNextWindowSize(ImVec2(window_width / 4, window_height));
     unsigned long window_flags = ImGuiWindowFlags_NoResize | ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoCollapse;
     if (ImGui::Begin("OceanTool", NULL, window_flags))
     {
@@ -1022,6 +1031,22 @@ static void UpdateOceanTool(OceanTool* tool, int buttons, int dwheel, int dx, in
 
     // update camera
 
+    {
+        const float DESIRED_FOV = Math::PI / 3;
+
+        tool->camera.aspect = (float) (window_width * 3 / 4) / (float) window_height;
+
+        if (tool->camera.aspect >= 1)
+        {
+            tool->camera.fovy = DESIRED_FOV;
+        }
+        else
+        {
+            // compute vertical fov given horizontal fov
+            tool->camera.fovy = 2 * atan(1 / tool->camera.aspect * tan(DESIRED_FOV / 2));
+        }
+    }
+
     if (!ImGui::GetIO().WantCaptureMouse)
     {
         Matrix4 matrix = tool->camera.transform.GetMatrix();
@@ -1049,7 +1074,7 @@ static void UpdateOceanTool(OceanTool* tool, int buttons, int dwheel, int dx, in
 
     // draw ocean / height map / normal map
 
-    glViewport(win_width / 4, 0, win_width - win_width / 4, win_height);
+    glViewport(window_width / 4, 0, window_width * 3 / 4, window_height);
     glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
 
     switch (tool->display_mode)

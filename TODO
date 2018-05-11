@@ -1,4 +1,3 @@
-* Resizable window.
 * Validate ocean parameters (it just throws an assertion error on non-power-of-2 grid sizes right now).
 * More accurate normal map calculation. Take the gradient of the Fourier Series and run IDFT on it?
 * The SSE code is a direct translation of the scalar code. Can we do better?
