@@ -94,6 +94,8 @@ struct OceanTool
     OceanParams params;
     OceanParams pending_params;
 
+    bool gen_accurate_normal_map;
+
     DisplayMode display_mode;
 
     GLuint dummy_vao;
@@ -826,23 +828,113 @@ static void GenerateOcean(OceanTool* tool)
     glBindTexture(GL_TEXTURE_2D, tool->height_map);
     glTexImage2D(GL_TEXTURE_2D, 0, GL_R32F, Nx, Ny, 0, GL_RED, GL_FLOAT, height_map_data);
 
+    float* grad_x = new float[Nx * Ny];
+    float* grad_y = new float[Nx * Ny];
+
+    if (tool->gen_accurate_normal_map)
+    {
+        // NOTE: Since our original spectrum results in a signal that is not necessarily real, we construct
+        // a real signal equal in magnitude to the existing signal and perform spectral differentiation on it.
+
+        complex64* new_signal = new complex64[Nx * Ny];
+
+        for (int y = 0; y < Ny; ++y)
+            for (int x = 0; x < Nx; ++x)
+                new_signal[y * Nx + x] = std::abs(signal[y * Nx + x]);
+
+        complex64* new_spectrum = new complex64[Nx * Ny];
+
+        #if USE_SIMD
+        DFT2D_sse(new_signal, new_spectrum, Ny, Nx);
+        #else
+        DFT2D_scalar(new_signal, new_spectrum, Ny, Nx);
+        #endif
+
+        for (int y = 0; y < Ny; ++y)
+            for (int x = 0; x < Nx; ++x)
+                new_spectrum[y * Nx + x] /= Nx * Ny;
+
+        const complex64 I = complex64(0, 1);
+
+        complex64* grad_spectrum_x = new complex64[Nx * Ny];
+        complex64* grad_spectrum_y = new complex64[Nx * Ny];
+
+        for (int y = 0; y < Ny; ++y)
+        {
+            double ky = 0;
+            if (y < Ny / 2)
+                ky = 2 * Math::PI * y / Ly;
+            else if (y > Ny / 2) // NOTE: these are actually the negative frequencies
+                ky = 2 * Math::PI * (y-Ny) / Ly;
+
+            for (int x = 0; x < Nx; ++x)
+            {
+                double kx = 0;
+                if (x < Nx / 2)
+                    kx = 2 * Math::PI * x / Lx;
+                else if (x > Nx / 2) // NOTE: these are actually the negative frequencies
+                    kx = 2 * Math::PI * (x-Nx) / Lx;
+
+                grad_spectrum_x[y * Nx + x] = new_spectrum[y * Nx + x] * kx * I;
+                grad_spectrum_y[y * Nx + x] = new_spectrum[y * Nx + x] * ky * I;
+            }
+        }
+
+        complex64* grad_signal_x = new complex64[Nx * Ny];
+        complex64* grad_signal_y = new complex64[Nx * Ny];
+
+        #if USE_SIMD
+        IDFT2D_sse(grad_spectrum_x, grad_signal_x, Ny, Nx);
+        IDFT2D_sse(grad_spectrum_y, grad_signal_y, Ny, Nx);
+        #else
+        IDFT2D_scalar(grad_spectrum_x, grad_signal_x, Ny, Nx);
+        IDFT2D_scalar(grad_spectrum_y, grad_signal_y, Ny, Nx);
+        #endif
+
+        for (int y = 0; y < Ny; ++y)
+        {
+            for (int x = 0; x < Nx; ++x)
+            {
+                grad_x[y * Nx + x] = grad_signal_x[y * Nx + x].real();
+                grad_y[y * Nx + x] = grad_signal_y[y * Nx + x].real();
+            }
+        }
+
+        delete[] new_signal;
+        delete[] new_spectrum;
+        delete[] grad_spectrum_x;
+        delete[] grad_spectrum_y;
+        delete[] grad_signal_x;
+        delete[] grad_signal_y;
+    }
+    else
+    {
+        // NOTE: Use the finite difference approximation to compute the heightmap gradient.
+
+        for (int y = 0; y < Ny; ++y)
+        {
+            int yb = (y - 1 + Ny) % Ny;
+            int yt = (y + 1) % Ny;
+
+            for (int x = 0; x < Nx; ++x)
+            {
+                int xl = (x - 1 + Nx) % Nx;
+                int xr = (x + 1) % Nx;
+
+                grad_x[y * Nx + x] = (height_map_data[y * Nx + xr] - height_map_data[y * Nx + xl]) / (2 * Lx / Nx);
+                grad_y[y * Nx + x] = (height_map_data[yt * Nx + x] - height_map_data[yb * Nx + x]) / (2 * Ly / Ny);
+            }
+        }
+    }
+
     Vector3* normal_map_data = new Vector3[Nx * Ny];
 
     for (int y = 0; y < Ny; ++y)
     {
-        int yb = (y - 1 + Ny) % Ny;
-        int yt = (y + 1) % Ny;
-
         for (int x = 0; x < Nx; ++x)
         {
-            int xl = (x - 1 + Nx) % Nx;
-            int xr = (x + 1) % Nx;
-
-            float dHdx = (height_map_data[y * Nx + xr] - height_map_data[y * Nx + xl]) / (2 * Lx / Nx);
-            float dHdy = (height_map_data[yt * Nx + x] - height_map_data[yb * Nx + x]) / (2 * Ly / Ny);
-
-            Vector3 tangent = Math::Normalize(Vector3(1, 0, dHdx));
-            Vector3 bitangent = Math::Normalize(Vector3(0, 1, dHdy));
+            Vector3 tangent = Vector3(1, 0, grad_x[y * Nx + x]);
+            Vector3 bitangent = Vector3(0, 1, grad_y[y * Nx + x]);
             Vector3 normal = Math::Normalize(Math::Cross(tangent, bitangent));
             normal_map_data[y * Nx + x] = (normal + Vector3(1, 1, 1)) * 0.5;
         }
@@ -854,6 +946,8 @@ static void GenerateOcean(OceanTool* tool)
     delete[] spectrum;
     delete[] signal;
     delete[] height_map_data;
+    delete[] grad_x;
+    delete[] grad_y;
     delete[] normal_map_data;
 }
 
@@ -1003,6 +1097,11 @@ static void UpdateOceanTool(OceanTool* tool, int buttons, int dwheel, int dx, in
             ImGui::InputFloat("A", &tool->pending_params.A);
             ImGui::InputFloat("l", &tool->pending_params.l);
             ImGui::InputFloat("t", &tool->pending_params.t);
+
+            ImGui::Checkbox("Accurate normal map", &tool->gen_accurate_normal_map);
+            ImGui::SameLine(); ImGui::TextDisabled("(?)");
+            if (ImGui::IsItemHovered())
+                ImGui::SetTooltip("Performs spectral differentiation to compute the heightmap gradient. Requires 3 extra DFTs.");
 
             if (ImGui::Button("Generate with new seed"))
             {

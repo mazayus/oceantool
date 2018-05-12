@@ -31,6 +31,12 @@ typedef std::complex<double> complex64;
 
 // NOTE: All DFTs and IDFTs are unnormalized.
 
+void DFT1D_scalar(const complex64* in, complex64* out, int N);
+void DFT2D_scalar(const complex64* in, complex64* out, int N1, int N2);
+
+void DFT1D_sse(const complex64* in, complex64* out, int N);
+void DFT2D_sse(const complex64* in, complex64* out, int N1, int N2);
+
 void IDFT1D_scalar(const complex64* in, complex64* out, int N);
 void IDFT2D_scalar(const complex64* in, complex64* out, int N1, int N2);
 
