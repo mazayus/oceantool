@@ -1,4 +1,3 @@
-* Validate ocean parameters (it just throws an assertion error on non-power-of-2 grid sizes right now).
 * The SSE code is a direct translation of the scalar code. Can we do better?
 * Remove unused code (this project was extracted from one of my other projects).
 * Generating the ocean spectrum takes longer than performing the IDFT.

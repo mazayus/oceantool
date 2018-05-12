@@ -79,6 +79,10 @@ struct OceanParams
     uint32_t        seed;
 };
 
+#define OCEAN_PARAM_ERROR_INVALID_GRID_SIZE         BIT(0)
+#define OCEAN_PARAM_ERROR_INVALID_OCEAN_SIZE        BIT(1)
+#define OCEAN_PARAM_ERROR_INVALID_WIND_VELOCITY     BIT(2)
+
 enum DisplayMode
 {
     DISPLAY_MODE_SOLID,
@@ -93,6 +97,8 @@ struct OceanTool
 
     OceanParams params;
     OceanParams pending_params;
+
+    int ocean_param_errors;
 
     bool gen_accurate_normal_map;
 
@@ -1076,6 +1082,27 @@ static void SaveNormalMap(OceanTool* tool, const char* filename)
     fclose(fp);
 }
 
+static inline bool IsPowerOf2(unsigned int n)
+{
+    return (n != 0) && !(n & (n - 1));
+}
+
+static int ValidateOceanParams(const OceanParams* params)
+{
+    int ocean_param_errors = 0;
+
+    if (!IsPowerOf2(params->Nx) || !IsPowerOf2(params->Ny) || params->Nx <= 1 || params->Ny <= 1)
+        ocean_param_errors |= OCEAN_PARAM_ERROR_INVALID_GRID_SIZE;
+
+    if (params->Lx <= 0 || params->Ly <= 0)
+        ocean_param_errors |= OCEAN_PARAM_ERROR_INVALID_OCEAN_SIZE;
+
+    if (params->Vx == 0 && params->Vy == 0)
+        ocean_param_errors |= OCEAN_PARAM_ERROR_INVALID_WIND_VELOCITY;
+
+    return ocean_param_errors;
+}
+
 static void UpdateOceanTool(OceanTool* tool, int buttons, int dwheel, int dx, int dy)
 {
     // draw main panel
@@ -1091,9 +1118,36 @@ static void UpdateOceanTool(OceanTool* tool, int buttons, int dwheel, int dx, in
         {
             ImGui::TextWrapped("NOTE: These parameters are described in \"Simulating Ocean Water\" by Tessendorf.");
 
-            ImGui::InputInt2("N", &tool->pending_params.Nx);
-            ImGui::InputFloat2("L", &tool->pending_params.Lx);
-            ImGui::InputFloat2("V", &tool->pending_params.Vx);
+            if (ImGui::InputInt2("N", &tool->pending_params.Nx))
+                tool->ocean_param_errors &= ~OCEAN_PARAM_ERROR_INVALID_GRID_SIZE;
+
+            if (tool->ocean_param_errors & OCEAN_PARAM_ERROR_INVALID_GRID_SIZE)
+            {
+                ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(255, 0, 0, 255));
+                ImGui::TextWrapped("Grid size (N) should be a positive power of two.");
+                ImGui::PopStyleColor();
+            }
+
+            if (ImGui::InputFloat2("L", &tool->pending_params.Lx))
+                tool->ocean_param_errors &= ~OCEAN_PARAM_ERROR_INVALID_OCEAN_SIZE;
+
+            if (tool->ocean_param_errors & OCEAN_PARAM_ERROR_INVALID_OCEAN_SIZE)
+            {
+                ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(255, 0, 0, 255));
+                ImGui::TextWrapped("Ocean size (L) should be positive.");
+                ImGui::PopStyleColor();
+            }
+
+            if (ImGui::InputFloat2("V", &tool->pending_params.Vx))
+                tool->ocean_param_errors &= ~OCEAN_PARAM_ERROR_INVALID_WIND_VELOCITY;
+
+            if (tool->ocean_param_errors & OCEAN_PARAM_ERROR_INVALID_WIND_VELOCITY)
+            {
+                ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(255, 0, 0, 255));
+                ImGui::TextWrapped("Wind velocity (V) should be non-zero.");
+                ImGui::PopStyleColor();
+            }
+
             ImGui::InputFloat("A", &tool->pending_params.A);
             ImGui::InputFloat("l", &tool->pending_params.l);
             ImGui::InputFloat("t", &tool->pending_params.t);
@@ -1105,16 +1159,24 @@ static void UpdateOceanTool(OceanTool* tool, int buttons, int dwheel, int dx, in
 
             if (ImGui::Button("Generate with new seed"))
             {
-                std::random_device rd;
-                tool->pending_params.seed = rd();
-                tool->params = tool->pending_params;
-                GenerateOcean(tool);
+                tool->ocean_param_errors = ValidateOceanParams(&tool->pending_params);
+                if (!tool->ocean_param_errors)
+                {
+                    std::random_device rd;
+                    tool->pending_params.seed = rd();
+                    tool->params = tool->pending_params;
+                    GenerateOcean(tool);
+                }
             }
 
             if (ImGui::Button("Regenerate with current seed"))
             {
-                tool->params = tool->pending_params;
-                GenerateOcean(tool);
+                tool->ocean_param_errors = ValidateOceanParams(&tool->pending_params);
+                if (!tool->ocean_param_errors)
+                {
+                    tool->params = tool->pending_params;
+                    GenerateOcean(tool);
+                }
             }
         }
 
